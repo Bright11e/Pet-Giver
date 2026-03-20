@@ -1,0 +1,214 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+
+local TELEPORT_KEY = Enum.KeyCode.P
+local TELEPORT_INTERVAL = 0.01
+local MIN_RANGE = 3000000
+local MAX_RANGE = 6000000
+local USE_WORLD_CENTER = false
+
+local isTeleporting = false
+local teleportLoop = nil
+local lastTeleportTime = 0
+local character, humanoidRootPart
+local lastDistance = 0
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 250, 0, 80)
+frame.Position = UDim2.new(1, -260, 0, 10)
+frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+frame.BackgroundTransparency = 0.3
+frame.BorderSizePixel = 0
+frame.Visible = false
+frame.Parent = screenGui
+
+local outline = Instance.new("Frame")
+outline.Size = UDim2.new(1, 0, 1, 0)
+outline.Position = UDim2.new(0, 0, 0, 0)
+outline.BackgroundTransparency = 1
+outline.BorderSizePixel = 2
+outline.BorderColor3 = Color3.fromRGB(255, 255, 255)
+outline.Parent = frame
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = frame
+
+local outlineCorner = Instance.new("UICorner")
+outlineCorner.CornerRadius = UDim.new(0, 8)
+outlineCorner.Parent = outline
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, 0, 0, 25)
+statusLabel.Position = UDim2.new(0, 0, 0, 5)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "TELEPORT: OFF"
+statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+statusLabel.TextSize = 16
+statusLabel.Font = Enum.Font.GothamBold
+statusLabel.TextXAlignment = Enum.TextXAlignment.Center
+statusLabel.Parent = frame
+
+local distanceLabel = Instance.new("TextLabel")
+distanceLabel.Size = UDim2.new(1, 0, 0, 30)
+distanceLabel.Position = UDim2.new(0, 0, 0, 30)
+distanceLabel.BackgroundTransparency = 1
+distanceLabel.Text = "Last Teleport: 0 studs"
+distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+distanceLabel.TextSize = 14
+distanceLabel.Font = Enum.Font.Gotham
+distanceLabel.TextXAlignment = Enum.TextXAlignment.Center
+distanceLabel.Parent = frame
+
+local rangeLabel = Instance.new("TextLabel")
+rangeLabel.Size = UDim2.new(1, 0, 0, 20)
+rangeLabel.Position = UDim2.new(0, 0, 0, 60)
+rangeLabel.BackgroundTransparency = 1
+rangeLabel.Text = "Range: 3M - 6M"
+rangeLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+rangeLabel.TextSize = 11
+rangeLabel.Font = Enum.Font.Gotham
+rangeLabel.TextXAlignment = Enum.TextXAlignment.Center
+rangeLabel.Parent = frame
+
+local function formatDistance(distance)
+    if distance >= 1000000 then
+        return string.format("%.2fM", distance / 1000000)
+    elseif distance >= 1000 then
+        return string.format("%.1fK", distance / 1000)
+    else
+        return string.format("%.0f", distance)
+    end
+end
+
+local function updateDistanceDisplay(distance)
+    local formatted = formatDistance(distance)
+    distanceLabel.Text = string.format("Last Teleport: %s studs", formatted)
+    
+    local intensity = math.min(1, distance / 10000000)
+    local r = 1
+    local g = 1 - intensity * 0.5
+    local b = 1 - intensity
+    distanceLabel.TextColor3 = Color3.new(r, g, b)
+end
+
+local function getRandomPosition(centerPos)
+    local random = Random.new()
+    
+    local angle = random:NextNumber(0, 2 * math.pi)
+    local distance = random:NextNumber(MIN_RANGE, MAX_RANGE)
+    local heightOffset = random:NextNumber(-50000, 50000)
+    
+    local newX = centerPos.X + math.cos(angle) * distance
+    local newZ = centerPos.Z + math.sin(angle) * distance
+    local newY = centerPos.Y + heightOffset
+    
+    local actualDistance = math.sqrt(newX^2 + newZ^2 + newY^2)
+    lastDistance = actualDistance
+    updateDistanceDisplay(actualDistance)
+    
+    return Vector3.new(newX, newY, newZ)
+end
+
+local function teleportRandom()
+    if not character or not humanoidRootPart then 
+        return false
+    end
+    
+    local centerPos
+    if USE_WORLD_CENTER then
+        centerPos = Vector3.new(0, 500, 0)
+    else
+        centerPos = humanoidRootPart.Position
+    end
+    
+    local targetPos = getRandomPosition(centerPos)
+    humanoidRootPart.CFrame = CFrame.new(targetPos)
+    
+    return true
+end
+
+local function toggleTeleportMode()
+    isTeleporting = not isTeleporting
+    
+    if isTeleporting then
+        frame.Visible = true
+        statusLabel.Text = "TELEPORT: ON"
+        statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+        
+        local pulse = Instance.new("UIGradient")
+        pulse.Rotation = 45
+        pulse.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 255, 0)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 100, 0)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 255, 0))
+        })
+        pulse.Parent = frame
+        
+        lastTeleportTime = tick()
+        
+        teleportLoop = RunService.Heartbeat:Connect(function()
+            if isTeleporting and character and humanoidRootPart then
+                local currentTime = tick()
+                
+                if currentTime - lastTeleportTime >= TELEPORT_INTERVAL then
+                    teleportRandom()
+                    lastTeleportTime = currentTime
+                end
+            end
+        end)
+        
+    else
+        statusLabel.Text = "TELEPORT: OFF"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+        
+        for _, child in pairs(frame:GetChildren()) do
+            if child:IsA("UIGradient") then
+                child:Destroy()
+            end
+        end
+        
+        if teleportLoop then
+            teleportLoop:Disconnect()
+            teleportLoop = nil
+        end
+    end
+end
+
+local function initializeCharacter(newCharacter)
+    character = newCharacter
+    humanoidRootPart = newCharacter:WaitForChild("HumanoidRootPart")
+    
+    if isTeleporting then
+        isTeleporting = false
+        frame.Visible = false
+        
+        if teleportLoop then
+            teleportLoop:Disconnect()
+            teleportLoop = nil
+        end
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, isGameProcessed)
+    if isGameProcessed then 
+        return 
+    end
+    
+    if input.KeyCode == TELEPORT_KEY then
+        if character and humanoidRootPart then
+            toggleTeleportMode()
+        end
+    end
+end)
+
+player.CharacterAdded:Connect(initializeCharacter)
+
+if player.Character then
+    initializeCharacter(player.Character)
+end
